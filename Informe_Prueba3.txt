@@ -171,13 +171,16 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
 - Imágenes desplegadas desde ECR; variables de entorno cargadas (DB_HOST, DB_USER, etc.).
 - Balanceo: Service tienda-frontend tipo LoadBalancer → Classic ELB público.
 - Comunicación Front→Back por DNS interno (tienda-backend) y Back→DB (tienda-db).
-- URL pública (EXTERNAL-IP del ELB): ________________________________________________
+- URL pública (EXTERNAL-IP del ELB):
+  http://a49d9bbc548ab48b19dddc7f331bf7c4-1672428966.us-east-1.elb.amazonaws.com (HTTP, puerto 80)
+- El EXTERNAL-IP se obtuvo por dos vías equivalentes: (1) automatizada, en los logs del
+  pipeline (paso "Ver pods, servicios y HPA" → kubectl get svc); (2) manual, en CloudShell
+  tras `aws eks update-kubeconfig` con `kubectl get svc -n tienda`.
 
    [FOTO] fotos/IE2_01_ecr_repos.png
-   [FOTO] fotos/IE2_02_ecr_imagenes.png
-   [FOTO] fotos/IE2_03_get_pods_running.png
-   [FOTO] fotos/IE2_04_external_ip.png
-   [FOTO] fotos/IE2_05_app_navegador.png
+   [FOTO] fotos/IE2_02_externalip_actions.png    (EXTERNAL-IP en logs de GitHub Actions)
+   [FOTO] fotos/IE2_03_externalip_cloudshell.png (mismo EXTERNAL-IP por CloudShell)
+   [FOTO] fotos/IE2_04_app_navegador.png         (Tienda Perritos cargada desde el ELB)
 
 
 --------------------------------------------------------------------------------
@@ -253,9 +256,10 @@ pida más pods de los que caben. No se implementó (Learner Lab) pero se deja do
 --------------------------------------------------------------------------------
 - Workflow: .github/workflows/deploy-eks.yml (trigger: push a main / manual).
 - Etapas: credenciales AWS → login ECR → build & push (front/back/db) → kubectl deploy.
-- Despliegue automático tras commit: SÍ / NO.  Tiempo aprox. del pipeline: ______ min.
+- Despliegue automático tras commit: SÍ (push a main dispara el workflow).
+  Tiempo aprox. del pipeline: ~2 min (corrida #2: 1m56s).
 
-   [FOTO] fotos/IE4_01_workflow_verde.png
+   [FOTO] fotos/IE4_01_pipeline_verde.png
 
 
 --------------------------------------------------------------------------------
@@ -273,9 +277,15 @@ pida más pods de los que caben. No se implementó (Learner Lab) pero se deja do
 --------------------------------------------------------------------------------
  IE6 — ANÁLISIS DE LOGS, MÉTRICAS Y TIEMPOS
 --------------------------------------------------------------------------------
-- Logs: kubectl logs (backend/frontend) y/o CloudWatch.
-- Métricas: uso de CPU/memoria de pods (Metrics Server / CloudWatch).
-- Tiempos del pipeline y observaciones / oportunidades de mejora: __________________
+- Logs: `kubectl logs deploy/tienda-backend -n tienda` muestra "Servidor backend
+  escuchando en puerto 3001" y "Pool de conexiones MySQL inicializado" (conexión Back↔DB
+  OK). El frontend (nginx) registra respuestas 200 OK, incluidas las sondas kube-probe
+  (health checks de readiness/liveness funcionando).
+- Métricas: uso de CPU/memoria por pod vía Metrics Server (`kubectl top pods -n tienda`).
+- CloudWatch: se activaron temporalmente los logs del plano de control (Servidor de la API
+  + Auditoría) → log group /aws/eks/tienda-eks/cluster con streams kube-apiserver. Se
+  DESACTIVAN tras la captura para no consumir créditos del Learner Lab.
+- Tiempos del pipeline: ~2 min por corrida completa (build+push+deploy).
 
    [FOTO] fotos/IE6_01_logs.png
    [FOTO opcional] fotos/IE6_02_cloudwatch.png
@@ -284,9 +294,11 @@ pida más pods de los que caben. No se implementó (Learner Lab) pero se deja do
 --------------------------------------------------------------------------------
  IE7 — VALIDACIÓN FUNCIONAL (Front↔Back) Y RECUPERACIÓN
 --------------------------------------------------------------------------------
-- CRUD completo probado en la web (crear/editar/eliminar producto): OK / fallas.
-- Autorrecuperación: al borrar un pod, Kubernetes lo recrea automáticamente.
-- Recuperación post-redeploy (rollout exitoso tras commit): OK / fallas.
+- CRUD completo probado en la web (crear/editar/eliminar producto): OK.
+- Autorrecuperación: al borrar el pod tienda-backend-...-9ccrb, Kubernetes creó
+  automáticamente uno nuevo (...-4fr7x, AGE 15s) manteniendo las 2 réplicas. OK.
+- Recuperación post-redeploy (rollout exitoso tras commit): OK (cada push ejecuta
+  `kubectl set image` + `rollout status` sin downtime).
 
    [FOTO] fotos/IE7_01_cloudshell_get_ns_nodes.png
    [FOTO] fotos/IE7_02_pod_recreado.png
