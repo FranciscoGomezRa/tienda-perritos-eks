@@ -1,0 +1,139 @@
+================================================================================
+ INFORME — EVALUACIÓN PARCIAL N°3
+ CI/CD con Autoscaling y Load Balancer en AWS EKS — "Tienda Perritos"
+ Asignatura: Introducción a Herramientas DevOps (ISY1101) — Duoc UC
+================================================================================
+
+Integrantes (dupla) : ______________________________  /  ______________________________
+Fecha               : ____ / ____ / ______
+Repositorio GitHub  : ____________________________________________________________
+Región AWS / Clúster: us-east-1 / tienda-eks        Namespace: tienda
+
+--------------------------------------------------------------------------------
+ 1. INTRODUCCIÓN Y OBJETIVO
+--------------------------------------------------------------------------------
+Breve descripción del encargo: orquestar la app "Tienda Perritos" (frontend + backend +
+MySQL) en AWS EKS, con pipeline CI/CD en GitHub Actions, autoscaling (HPA) y balanceo de
+carga, demostrando despliegue automatizado, escalabilidad y alta disponibilidad.
+
+[Escribir 4-6 líneas con tus palabras]
+
+
+--------------------------------------------------------------------------------
+ 2. ARQUITECTURA DE LA SOLUCIÓN
+--------------------------------------------------------------------------------
+Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
+(LoadBalancer/ClusterIP/headless), comunicación interna por DNS. (Ver diagrama del README.md.)
+
+[Texto + diagrama]
+[FOTO opcional: diagrama de arquitectura]
+
+
+--------------------------------------------------------------------------------
+ IE1 — CONFIGURACIÓN DEL CLÚSTER AWS (VPC, subredes, SG, IAM, nodos)
+--------------------------------------------------------------------------------
+- VPC y subredes en 2 AZ (us-east-1a / us-east-1b): __________________________________
+- Rol IAM utilizado: LabRole (en Learner Lab no se pueden crear roles nuevos).
+- Node group: tipo de instancia ________, desired/min/max = 2 / 2 / 4.
+- Justificación de la arquitectura (por qué 2 AZ, por qué EKS): _______________________
+
+   [FOTO] fotos/IE1_01_vpc_subredes_2az.png
+   [FOTO] fotos/IE1_02_eks_cluster_active.png
+   [FOTO] fotos/IE1_03_nodegroup.png
+   [FOTO] fotos/IE1_04_nodos_ec2_ip_publica.png
+
+
+--------------------------------------------------------------------------------
+ IE2 — DESPLIEGUE FRONTEND + BACKEND (ECR, variables, ELB, URL pública)
+--------------------------------------------------------------------------------
+- Repos ECR creados: tienda-frontend / tienda-backend / tienda-db.
+- Imágenes desplegadas desde ECR; variables de entorno cargadas (DB_HOST, DB_USER, etc.).
+- Balanceo: Service tienda-frontend tipo LoadBalancer → Classic ELB público.
+- Comunicación Front→Back por DNS interno (tienda-backend) y Back→DB (tienda-db).
+- URL pública (EXTERNAL-IP del ELB): ________________________________________________
+
+   [FOTO] fotos/IE2_01_ecr_repos.png
+   [FOTO] fotos/IE2_02_ecr_imagenes.png
+   [FOTO] fotos/IE2_03_get_pods_running.png
+   [FOTO] fotos/IE2_04_external_ip.png
+   [FOTO] fotos/IE2_05_app_navegador.png
+
+
+--------------------------------------------------------------------------------
+ IE3 — AUTOSCALING (HPA)
+--------------------------------------------------------------------------------
+- HPA backend: 2→10 réplicas, umbral 70% CPU.  HPA frontend: 2→6, umbral 60% CPU.
+- Requisito: Metrics Server (instalado por el pipeline).
+- Justificación del umbral elegido: _________________________________________________
+- Evidencia de carga / escalado: ___________________________________________________
+
+   [FOTO] fotos/IE3_01_get_hpa.png
+   [FOTO] fotos/IE3_02_hpa_escalando.png
+   [FOTO] fotos/IE3_03_pods_nuevos.png
+
+NOTA (mejora futura): Cluster Autoscaler escalaría también los NODOS EC2 cuando el HPA
+pida más pods de los que caben. No se implementó (Learner Lab) pero se deja documentado.
+
+
+--------------------------------------------------------------------------------
+ IE4 — PIPELINE CI/CD (build → push → deploy)
+--------------------------------------------------------------------------------
+- Workflow: .github/workflows/deploy-eks.yml (trigger: push a main / manual).
+- Etapas: credenciales AWS → login ECR → build & push (front/back/db) → kubectl deploy.
+- Despliegue automático tras commit: SÍ / NO.  Tiempo aprox. del pipeline: ______ min.
+
+   [FOTO] fotos/IE4_01_workflow_verde.png
+
+
+--------------------------------------------------------------------------------
+ IE5 — GESTIÓN DE SECRETS Y CREDENCIALES
+--------------------------------------------------------------------------------
+- GitHub: Environment "production" con Secrets (AWS_* , EKS_* , MYSQL_ROOT_PASSWORD).
+- Credenciales de BD en .env (gitignored); el Secret de k8s se GENERA en el pipeline.
+- Sin contraseñas versionadas en el repositorio (db/Dockerfile y manifests limpios).
+- ¿Por qué un Environment? scope/aislamiento, reglas de protección, trazabilidad.
+
+   [FOTO] fotos/IE5_01_github_environment.png
+   [FOTO] fotos/IE5_02_github_secrets.png
+
+
+--------------------------------------------------------------------------------
+ IE6 — ANÁLISIS DE LOGS, MÉTRICAS Y TIEMPOS
+--------------------------------------------------------------------------------
+- Logs: kubectl logs (backend/frontend) y/o CloudWatch.
+- Métricas: uso de CPU/memoria de pods (Metrics Server / CloudWatch).
+- Tiempos del pipeline y observaciones / oportunidades de mejora: __________________
+
+   [FOTO] fotos/IE6_01_logs.png
+   [FOTO opcional] fotos/IE6_02_cloudwatch.png
+
+
+--------------------------------------------------------------------------------
+ IE7 — VALIDACIÓN FUNCIONAL (Front↔Back) Y RECUPERACIÓN
+--------------------------------------------------------------------------------
+- CRUD completo probado en la web (crear/editar/eliminar producto): OK / fallas.
+- Autorrecuperación: al borrar un pod, Kubernetes lo recrea automáticamente.
+- Recuperación post-redeploy (rollout exitoso tras commit): OK / fallas.
+
+   [FOTO] fotos/IE7_01_cloudshell_get_ns_nodes.png
+   [FOTO] fotos/IE7_02_pod_recreado.png
+   [FOTO] fotos/IE7_03_crud_ok.png
+   [FOTO] fotos/IE7_04_redeploy.png
+
+
+--------------------------------------------------------------------------------
+ 3. PROBLEMAS ENCONTRADOS Y SOLUCIONES
+--------------------------------------------------------------------------------
+- Problema 1: __________________________  →  Solución: __________________________
+- Problema 2: __________________________  →  Solución: __________________________
+(Ej.: credenciales del lab que rotan; HPA en <unknown> por falta de Metrics Server;
+ LoadBalancer que requería controller → se usó Classic ELB; etc.)
+
+
+--------------------------------------------------------------------------------
+ 4. CONCLUSIONES Y MEJORA CONTINUA
+--------------------------------------------------------------------------------
+[Reflexión sobre automatización, escalabilidad, seguridad de secrets y próximos pasos
+ (ej. Cluster Autoscaler, HTTPS/Ingress, dominio propio, tests en el pipeline).]
+
+================================================================================
