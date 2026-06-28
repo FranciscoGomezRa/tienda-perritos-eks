@@ -37,6 +37,35 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
 - Rol IAM utilizado: LabRole (en Learner Lab no se pueden crear roles nuevos).
 - Node group: tipo de instancia t3.medium, desired/min/max = 2 / 2 / 4, en subredes PRIVADAS.
 
+  JUSTIFICACIÓN DEL TIPO DE INSTANCIA (t3.medium) Y DESCARTE DE t2.micro/nano
+  --------------------------------------------------------------------------
+  Se eligió t3.medium (2 vCPU, 4 GiB RAM) como mínimo viable para los nodos
+  worker, descartando instancias más pequeñas (t2.nano / t2.micro) pese a su
+  menor costo, por tres razones técnicas:
+
+  1) LÍMITE DE IPs POR NODO (el factor decisivo). En EKS, el plugin de red
+     Amazon VPC CNI asigna una IP de la VPC a cada pod, y la cantidad de IPs
+     disponibles depende del tamaño de la instancia (número de ENI x IPs por
+     ENI). t2.micro/nano permiten ~4 pods por nodo; t3.medium permite ~17
+     (Max ENI 3, Max IPs 18). Con solo 4 IPs no alcanza ni para los pods de
+     sistema.
+
+  2) PODS DE SISTEMA. Cada nodo ya ejecuta CoreDNS, kube-proxy, aws-node (CNI)
+     y Metrics Server. Eso consume casi toda la capacidad de un t2.micro,
+     dejando sin espacio a la aplicación (frontend, backend, MySQL) y, sobre
+     todo, sin margen para que el HPA cree réplicas adicionales: los pods
+     nuevos quedarían en estado Pending.
+
+  3) MEMORIA. 0.5-1 GiB (t2.nano/micro) no basta para kubelet + pods de sistema
+     + MySQL + Node/Express; los nodos quedarían NotReady o con pods Pending.
+     Los 4 GiB de t3.medium dan holgura para operar y para escalar.
+
+  El ahorro de una instancia más pequeña es ilusorio, porque rompería la demo
+  del autoscaling (HPA), que es el núcleo del indicador de escalabilidad. El
+  control de créditos se gestionó por otras vías: desired=2 (no más nodos de
+  los necesarios), apagado de la observabilidad y Stop Lab al terminar cada
+  sesión (el NAT Gateway y los nodos son el principal consumo).
+
   PERMISOS IAM (políticas ya incluidas en LabRole)
   ------------------------------------------------
   No fue necesario crear ni adjuntar políticas: AWS Academy entrega LabRole con un
@@ -80,14 +109,59 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
   redundantes: actúan sobre capas distintas. Sería redundante solo si los nodos
   estuvieran en públicas (con IP) y además se enrutaran por NAT.
 
+  ACCESO REMOTO A LOS NODOS = DESHABILITADO (sin SSH)
+  ---------------------------------------------------
+  En la creación del node group se dejó OFF la opción "Configurar el acceso remoto
+  a los nodos". El motivo principal es que NO se necesita entrar a los nodos: toda
+  la operación y administración del clúster se hace con kubectl desde CloudShell,
+  que se comunica con el API del clúster (no con los nodos por SSH). Además, esa
+  opción habilita específicamente SSH (puerto 22 + par de claves), lo que expondría
+  los nodos y contradice el diseño de red privada (Camino B). Si de forma
+  excepcional se necesitara una shell dentro de un nodo (depurar kubelet, disco,
+  etc.), se usaría AWS SSM Session Manager en lugar de SSH, porque: no abre el
+  puerto 22, funciona sobre nodos privados sin IP pública ni par de claves, y queda
+  controlado por IAM y auditado. Por eso dejar el acceso remoto en OFF no elimina
+  ese "plan B".
+
+  POR QUÉ LOS NODOS VAN EN SUBREDES PRIVADAS (y no públicas)
+  ---------------------------------------------------------
+  El reparto de subredes responde a su función:
+    • Públicas (2): tienen ruta directa a Internet (Internet Gateway) y alojan el
+      Load Balancer (ELB) y el NAT Gateway.
+    • Privadas (4): sin IP pública; salen a Internet a través del NAT. Alojan los
+      nodos worker (los pods).
+  Si los nodos se colocaran en subredes públicas recibirían IP pública y quedarían
+  expuestos directamente a Internet (mayor superficie de ataque), se perdería la
+  defensa en capas (el único punto de entrada debe ser el ELB) y las 4 subredes
+  privadas + el NAT quedarían sin uso. El flujo correcto es: el tráfico entra solo
+  por el ELB (en públicas) y se reenvía a los pods (en privadas); los nodos nunca
+  son alcanzables desde fuera y salen a Internet (p. ej. docker pull desde ECR)
+  vía NAT. Para el node group se seleccionaron exactamente las 4 subredes privadas
+  (2 en us-east-1a + 2 en us-east-1b), cubriendo las 2 AZ.
+
 - Por qué 2 AZ: alta disponibilidad (si una zona de AWS falla, la otra sigue).
 - Por qué EKS: orquestación gestionada (auto-recuperación, escalado, rolling updates).
 
-   [FOTO] fotos/IE1_00_nat_gateway.png
-   [FOTO] fotos/IE1_01_vpc_subredes_2az.png
-   [FOTO] fotos/IE1_02_eks_cluster_active.png
-   [FOTO] fotos/IE1_03_nodegroup.png
-   [FOTO] fotos/IE1_04_nodos_ec2_ip_publica.png
+   [FOTO] fotos/IE1_01_vpc_creacion.png            (VPC "y mas": 6 subredes + NAT)
+   [FOTO] fotos/IE1_02_subred_publica_autoip.png   (auto-assign IPv4 publica en subred publica)
+   [FOTO] fotos/IE1_03_subredes_6_lista.png        (6 subredes: 2 publicas + 4 privadas, Available)
+   [FOTO] fotos/IE1_04_tags_subred_publica.png     (etiqueta kubernetes.io/role/elb = 1)
+   [FOTO] fotos/IE1_05_tags_subred_privada.png     (etiqueta kubernetes.io/role/internal-elb = 1)
+   [FOTO] fotos/IE1_06_cluster_endpoint_acceso.png (endpoint "Publico y privado")
+   [FOTO] fotos/IE1_07_complementos_marcados.png   (CoreDNS, kube-proxy, CNI de Amazon VPC)
+   [FOTO] fotos/IE1_08_complemento_metrics_server.png (Servidor de metricas marcado)
+   [FOTO] fotos/IE1_09_review_cluster.png          (LabRole, modo API de EKS, K8s 1.35)
+   [FOTO] fotos/IE1_10_review_redes.png            (VPC, subredes, endpoint publico y privado)
+   [FOTO] fotos/IE1_11_review_observabilidad.png   (todo desactivado para ahorrar creditos)
+   [FOTO] fotos/IE1_12_review_complementos.png     (4 complementos listos para instalar)
+   [FOTO] fotos/IE1_13_review_versiones.png        (versiones de los complementos)
+   [FOTO] fotos/IE1_14_cluster_active.png          (clúster tienda-eks en estado Activo)
+   [FOTO] fotos/IE1_15_nodegroup_config.png        (tienda-nodes, rol LabRole, sin plantilla)
+   [FOTO] fotos/IE1_16_nodegroup_compute.png       (AMI AL2023, t3.medium, disco 20 GiB)
+   [FOTO] fotos/IE1_17_nodegroup_scaling.png       (deseado/min/max = 2/2/4)
+   [FOTO] fotos/IE1_18_nodegroup_subredes_privadas.png (4 subredes privadas, acceso remoto OFF)
+   [FOTO] fotos/IE1_19_nodegroup_review.png        (revisar y crear el node group)   <- PENDIENTE
+   [FOTO] fotos/IE1_20_nodos_ec2_privados.png      (2 nodos EC2 sin IP publica)       <- PENDIENTE
 
 
 --------------------------------------------------------------------------------
