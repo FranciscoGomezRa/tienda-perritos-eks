@@ -184,13 +184,65 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
  IE3 — AUTOSCALING (HPA)
 --------------------------------------------------------------------------------
 - HPA backend: 2→10 réplicas, umbral 70% CPU.  HPA frontend: 2→6, umbral 60% CPU.
-- Requisito: Metrics Server (instalado por el pipeline).
-- Justificación del umbral elegido: _________________________________________________
-- Evidencia de carga / escalado: ___________________________________________________
+- Requisito previo: Metrics Server. Se usa el COMPLEMENTO gestionado del clúster EKS
+  (habilitado en el wizard de creación), NO el manifiesto de upstream. El HPA calcula
+  el % de CPU contra el "request" definido en cada Deployment (backend request=100m,
+  límite=500m), por eso 70% del umbral equivale a 70m de CPU.
 
-   [FOTO] fotos/IE3_01_get_hpa.png
-   [FOTO] fotos/IE3_02_hpa_escalando.png
-   [FOTO] fotos/IE3_03_pods_nuevos.png
+- Justificación del umbral (70% backend / 60% frontend): se deja margen antes de saturar
+  el pod para que el HPA tenga tiempo de crear réplicas nuevas (que tardan en arrancar)
+  antes de degradar el servicio. El frontend usa un umbral algo menor (60%) porque es la
+  cara visible al usuario y conviene anticiparse más a los picos de tráfico.
+
+INCIDENTE RESUELTO (Metrics API / HPA en <unknown>):
+  Síntoma: tras desplegar, el HPA mostraba "cpu <unknown>/70%" y no escalaba; el comando
+  `kubectl top pods -n tienda` devolvía "error: Metrics API not available".
+  Diagnóstico: el APIService v1beta1.metrics.k8s.io estaba en AVAILABLE=False
+  (MissingEndpoints). El pipeline instalaba además el metrics-server de upstream
+  (components.yaml), cuyo Service usa el selector "k8s-app=metrics-server". Al hacer
+  `kubectl apply` sobre el Service que ya había creado el complemento del EKS (cuyos pods
+  usan la etiqueta "app.kubernetes.io/name"), los selectores se fusionaron en un AND
+  imposible → el Service no encontraba ningún pod → sin endpoints → Metrics API caída.
+  Solución inmediata (parche del selector):
+     kubectl patch svc metrics-server -n kube-system --type=json \
+       -p='[{"op":"remove","path":"/spec/selector/k8s-app"}]'
+  Solución de raíz (en el pipeline): se eliminó el paso que instalaba el metrics-server de
+  upstream y se dejó solo el complemento del EKS, agregando una verificación de la Metrics
+  API. Tras el parche: APIService AVAILABLE=True y HPA mostrando % real (backend 1%/70%).
+
+PRUEBA DE CARGA Y ESCALADO (evidencia de IE3):
+  Se generó carga artificial sobre el backend con un pod "load-generator" que lanza 10
+  bucles en paralelo de peticiones al endpoint /api/health, y se observó el HPA en vivo.
+
+  1) Monitor del HPA y los pods (terminal 1, CloudShell):
+       watch -n 2 "kubectl get hpa,pods -n tienda"
+     (alternativa de un solo recurso: kubectl get hpa -n tienda -w)
+
+  2) Generador de carga (terminal 2, CloudShell):
+       kubectl run -n tienda load-generator --image=busybox:1.28 --restart=Never -- \
+         /bin/sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do (while true; do \
+         wget -q -O- http://tienda-backend:3001/api/health >/dev/null 2>&1; done) & done; wait"
+
+  3) Detener la carga y mostrar el scale-down:
+       Ctrl+C en la terminal 2
+       kubectl delete pod load-generator -n tienda
+
+  Resultado observado (backend, umbral 70%):
+       cpu   1%/70%  → 2 réplicas   (reposo)
+       cpu  11%/70%  → 2 réplicas   (inicia la carga)
+       cpu 435%/70%  → 2 réplicas   (CPU disparado por encima del umbral)
+       cpu 383%/70%  → 4 réplicas   (HPA escala 2→4)
+       cpu 143%/70%  → 8 réplicas   (HPA escala 4→8; el CPU baja al repartirse)
+       cpu 122%..39%/70% → 10 réplicas (tope MAXPODS=10; CPU promedio cae bajo el umbral)
+  Conclusión: el HPA detectó el exceso de CPU, escaló automáticamente 2→4→8→10 pods
+  (máximo configurado) y, al distribuir la carga, el CPU promedio volvió bajo el 70%,
+  estabilizando el sistema sin intervención manual. Al retirar la carga, el HPA reduce
+  las réplicas de vuelta a 2 tras el periodo de enfriamiento (~3-5 min).
+
+   [FOTO] fotos/IE3_01_hpa_metricas_ok.png    (HPA con % real + kubectl top pods OK)
+   [FOTO] fotos/IE3_02_hpa_escalando.png      (HPA: CPU alto y réplicas subiendo 2→4→8)
+   [FOTO] fotos/IE3_03_pods_escalados.png     (10 pods backend Running / get pods -o wide)
+   [FOTO] fotos/IE3_04_hpa_scaledown.png      (HPA volviendo a 2 réplicas tras la carga)
 
 NOTA (mejora futura): Cluster Autoscaler escalaría también los NODOS EC2 cuando el HPA
 pida más pods de los que caben. No se implementó (Learner Lab) pero se deja documentado.
@@ -274,8 +326,13 @@ defensa y para el criterio de "optimización / mejora continua".
 
 [CI/CD — IE4]
 - Pipeline mejorado: usa el Environment "production"; genera el Secret de MySQL;
-  despliega también la imagen de la DB (set image + rollout); instala Metrics
-  Server (para HPA); etiqueta imágenes con SHA corto + latest.
+  despliega también la imagen de la DB (set image + rollout); etiqueta imágenes
+  con SHA corto + latest.
+- El Metrics Server NO se instala desde el pipeline: se usa el complemento gestionado
+  del EKS y el workflow solo VERIFICA que la Metrics API esté disponible. Antes el
+  pipeline aplicaba el components.yaml de upstream y su Service entraba en conflicto con
+  el del complemento (selectores fusionados → MissingEndpoints → HPA en <unknown>); ver
+  detalle en la sección IE3.
 
 [Pendientes de anotar a medida que avanzamos]
 - (agregar aquí nuevas mejoras que surjan en cada fase)
