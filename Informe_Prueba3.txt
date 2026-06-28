@@ -5,6 +5,9 @@
  Escuela de Informática y Telecomunicaciones
 ================================================================================
 
+Instituto           : Duoc UC
+Asignatura          : Introducción a Herramientas DevOps
+Docente             : Rafael Videla
 Integrantes (dupla) : Francisco Gómez Ramos  ·  Benjamin Aravena Rosales
 Fecha               : 28 / 06 / 2026
 Repositorio GitHub  : github.com/FranciscoGomezRa/tienda-perritos-eks
