@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/tienda-backend:latest # REEMPLAZAR 000000000000 por tu AWS Account ID. El pipeline la sobrescribe con `kubectl set image`.
+          image: 268450856324.dkr.ecr.us-east-1.amazonaws.com/tienda-backend:latest # Account ID 268450856324. El pipeline la sobrescribe con `kubectl set image`.
           ports:
             - containerPort: 3001
           env:

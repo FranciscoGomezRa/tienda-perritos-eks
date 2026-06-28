@@ -23,12 +23,23 @@ Checklist maestro. Marca `[x]` a medida que avances. Las 📸 indican capturas p
 - [ ] **Tú:** copiar `.env.example` a `.env` y poner tu `MYSQL_ROOT_PASSWORD`.
 
 ## Fase 1 — Infraestructura AWS por consola  [IE1]
-- [ ] Iniciar Learner Lab; copiar **AWS Details** (access key, secret, **session token**).
-- [ ] VPC con **2 subredes públicas en 2 AZ** (`us-east-1a`, `us-east-1b`). (Puede ser la VPC default.)
-- [ ] Revisar Security Groups (permitir tráfico del LB al puerto 80).
-- [ ] Crear **clúster EKS** `tienda-eks` con rol **`LabRole`** y las 2 subredes.
-- [ ] Crear **Node Group** (rol `LabRole`, `t3.medium`, desired=2, min=2, max=4).
-- [ ] 📸 `IE1_01_vpc_subredes_2az.png` — subredes en 2 AZ.
+> **Diseño elegido: patrón de producción (B)** — nodos en subredes **privadas** + **NAT Gateway**.
+> ELB en públicas, nodos sin IP pública (seguridad). Se argumentan ambos caminos en la defensa.
+> ⚠️ El NAT consume créditos: hacer **Stop Lab** al terminar y borrar la VPC al cerrar el proyecto.
+
+- [ ] Iniciar Learner Lab; copiar **AWS Details** (access key, secret, **session token**). Account ID: `268450856324`.
+- [ ] Crear **VPC** (`tienda-vpc`, asistente "VPC and more", `10.0.0.0/16`, **2 AZ**):
+      **2 subredes públicas + 4 privadas**, **NAT gateways: In 1 AZ** (1 NAT para ahorrar créditos),
+      VPC endpoints: None, DNS: ambas marcadas.
+- [ ] **Etiquetar subredes** (para que EKS ubique bien los balanceadores):
+      - Públicas: `kubernetes.io/role/elb = 1` + `kubernetes.io/cluster/tienda-eks = shared`
+      - Privadas: `kubernetes.io/role/internal-elb = 1` + `kubernetes.io/cluster/tienda-eks = shared`
+- [ ] Revisar Security Groups (el ELB crea el suyo; EKS gestiona reglas nodo↔ELB).
+- [ ] Crear **clúster EKS** `tienda-eks` con rol **`LabRole`**; en *Networking* seleccionar las
+      **6 subredes** (públicas para ELB/ENIs, privadas para nodos/ENIs). Endpoint access: Public.
+- [ ] Crear **Node Group** (rol `LabRole`, `t3.medium`, desired=2, min=2, max=4) **en las 4 (o 2) subredes PRIVADAS**.
+- [ ] 📸 `IE1_01_vpc_subredes_2az.png` — las 6 subredes (2 públicas + 4 privadas) en 2 AZ.
+- [ ] 📸 `IE1_00_nat_gateway.png` — el NAT Gateway creado (evidencia del diseño).
 - [ ] 📸 `IE1_02_eks_cluster_active.png` — clúster en estado **Active**.
 - [ ] 📸 `IE1_03_nodegroup.png` — node group **Active** / nodos `Ready`.
 - [ ] 📸 `IE1_04_nodos_ec2_ip_publica.png` — instancias EC2 con **IP pública**.

@@ -32,11 +32,39 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
 --------------------------------------------------------------------------------
  IE1 — CONFIGURACIÓN DEL CLÚSTER AWS (VPC, subredes, SG, IAM, nodos)
 --------------------------------------------------------------------------------
-- VPC y subredes en 2 AZ (us-east-1a / us-east-1b): __________________________________
+- VPC: tienda-vpc (10.0.0.0/16) con 6 subredes en 2 AZ (us-east-1a / us-east-1b):
+  2 públicas + 4 privadas. NAT Gateway para la salida a internet de las privadas.
 - Rol IAM utilizado: LabRole (en Learner Lab no se pueden crear roles nuevos).
-- Node group: tipo de instancia ________, desired/min/max = 2 / 2 / 4.
-- Justificación de la arquitectura (por qué 2 AZ, por qué EKS): _______________________
+- Node group: tipo de instancia t3.medium, desired/min/max = 2 / 2 / 4, en subredes PRIVADAS.
 
+  JUSTIFICACIÓN DEL DISEÑO DE RED (elegido: patrón de producción)
+  ---------------------------------------------------------------
+  Se evaluaron dos topologías:
+
+  • Camino A (lab simplificado): nodos en subredes PÚBLICAS con auto-assign de IP
+    pública; sin NAT. Ventaja: cero costo de NAT y menos componentes. Desventaja:
+    los nodos quedan expuestos con IP pública (mayor superficie de ataque) y las
+    4 subredes privadas quedarían casi sin uso.
+
+  • Camino B (ELEGIDO, producción): nodos en subredes PRIVADAS (sin IP pública),
+    un NAT Gateway en subred pública para su salida a internet, y el Load Balancer
+    en las subredes públicas. Por qué lo elegimos:
+      - Seguridad: ningún nodo es accesible directamente desde internet; el único
+        punto de entrada es el ELB.
+      - Defensa en capas: aunque un pod sea comprometido, el nodo no está expuesto.
+      - Coherencia: las 6 subredes cumplen un rol real (públicas=ELB+NAT, privadas=nodos).
+      - Es la arquitectura recomendada por AWS para EKS en entornos reales.
+    Costo asumido: el NAT consume créditos; se mitigó usando 1 solo NAT y apagando
+    el lab al terminar. En producción se usaría 1 NAT por AZ para alta disponibilidad.
+
+  Aclaración técnica: auto-assign de IP pública (en subredes públicas) y NAT NO son
+  redundantes: actúan sobre capas distintas. Sería redundante solo si los nodos
+  estuvieran en públicas (con IP) y además se enrutaran por NAT.
+
+- Por qué 2 AZ: alta disponibilidad (si una zona de AWS falla, la otra sigue).
+- Por qué EKS: orquestación gestionada (auto-recuperación, escalado, rolling updates).
+
+   [FOTO] fotos/IE1_00_nat_gateway.png
    [FOTO] fotos/IE1_01_vpc_subredes_2az.png
    [FOTO] fotos/IE1_02_eks_cluster_active.png
    [FOTO] fotos/IE1_03_nodegroup.png

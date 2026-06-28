@@ -35,7 +35,8 @@ despliega en el clúster, con **autoscaling de pods (HPA)** y **balanceo de carg
         │                                                   Service tienda-db ──► Pod MySQL
         │                                                   (headless)            (Secret) │
         └──────────────────────────────────────────────────────────────────────────┘
-              Nodos EC2 repartidos en 2 Zonas de Disponibilidad (us-east-1a / 1b)
+   Red: VPC 10.0.0.0/16 en 2 AZ (us-east-1a/1b) · 2 subredes públicas (ELB + NAT) +
+   4 privadas (nodos worker, sin IP pública) · NAT Gateway para la salida de las privadas.
 ```
 
 - **Frontend**: Nginx sirve `index.html` + `app.js` y hace **proxy `/api/` → backend** (`default.conf`).
