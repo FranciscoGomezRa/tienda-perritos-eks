@@ -150,6 +150,45 @@ pida más pods de los que caben. No se implementó (Learner Lab) pero se deja do
 
 
 --------------------------------------------------------------------------------
+ BITÁCORA DE MEJORAS Y DECISIONES (se actualiza durante todo el proyecto)
+--------------------------------------------------------------------------------
+Lista central de mejoras aplicadas al proyecto base del profesor. Útil para la
+defensa y para el criterio de "optimización / mejora continua".
+
+[Estructura del repositorio]
+- Se unificó a un MONOREPO con la app en la raíz (los 3 repos entregados eran
+  idénticos byte a byte; se usó 3.6.3). Así GitHub Actions detecta el workflow.
+- Material del profesor archivado en docs_profesor/.
+
+[Correcciones de código]
+- fix(backend): server.js tenía DB_HOST = tienda-db (sin comillas) → referencia
+  inválida; corregido a "tienda-db".
+
+[Seguridad / Secrets — IE5]
+- Se quitaron credenciales horneadas en db/Dockerfile (la password va por runtime).
+- Se eliminó k8s/mysql-secret.yaml (password en base64 versionada) → ahora el Secret
+  se GENERA en el pipeline desde GitHub Secrets; queda mysql-secret.example.yaml.
+- Variables sensibles en .env (en .gitignore) + .env.example de referencia.
+- Secrets en un GitHub Environment "production" (scope, reglas de protección,
+  trazabilidad) en vez de sueltos en el repo.
+
+[Despliegue / Red — IE1, IE2]
+- frontend-service: se quitaron anotaciones del AWS LB Controller (no está en
+  Learner Lab) → Classic ELB con type: LoadBalancer (URL pública).
+- Diseño de red de PRODUCCIÓN (Camino B): 2 subredes públicas + 4 privadas en 2 AZ,
+  NAT Gateway, nodos worker en privadas (sin IP pública), ELB en públicas.
+  Etiquetado de subredes (role/elb e internal-elb) para el balanceo.
+
+[CI/CD — IE4]
+- Pipeline mejorado: usa el Environment "production"; genera el Secret de MySQL;
+  despliega también la imagen de la DB (set image + rollout); instala Metrics
+  Server (para HPA); etiqueta imágenes con SHA corto + latest.
+
+[Pendientes de anotar a medida que avanzamos]
+- (agregar aquí nuevas mejoras que surjan en cada fase)
+
+
+--------------------------------------------------------------------------------
  3. PROBLEMAS ENCONTRADOS Y SOLUCIONES
 --------------------------------------------------------------------------------
 - Problema 1: __________________________  →  Solución: __________________________
