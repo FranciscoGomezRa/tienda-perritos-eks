@@ -5,6 +5,7 @@ pipeline **CI/CD con GitHub Actions** que construye las imágenes, las publica e
 y las despliega en el clúster, con **autoescalado de pods (HPA)** y **balanceo de carga (ELB)**.
 
 > Evaluación Parcial N°3 — *Introducción a Herramientas DevOps (ISY1101)* · Duoc UC.
+> **Autores:** Francisco Gómez Ramos · Benjamin Aravena Rosales — **Docente:** Rafael Videla.
 > Informe completo en [`Informe_Prueba3.pdf`](Informe_Prueba3.pdf).
 
 ---
