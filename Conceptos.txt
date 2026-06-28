@@ -1,0 +1,15 @@
+¿Qué es HPA? Horizontal Pod Autoscaler. Es un objeto de Kubernetes que vigila el uso de CPU/memoria de tus pods y crea o elimina réplicas de pods automáticamente (ej: si el backend pasa del 70% de CPU, pasa de 2 a 3, 4… hasta 10 pods). Es autoscaling a nivel de aplicación/contenedor. Ya viene listo en k8s/backend-hpa.yaml y frontend-hpa.yaml. Necesita que instales Metrics Server en el clúster para funcionar.
+
+Autoscaling de nodos (Cluster Autoscaler): escala las máquinas EC2 del clúster, no los pods. Sirve cuando el HPA quiere crear más pods pero ya no caben porque los nodos están llenos: entonces añade nodos nuevos automáticamente. Contexto: cargas muy variables o picos grandes donde la capacidad fija de nodos se queda corta. No lo usaremos (lo anoto en el informe como mejora futura), porque en Learner Lab es engorroso y el HPA ya cumple la rúbrica (IE3).
+
+CloudShell: es una terminal en el navegador dentro de la consola AWS, que ya trae AWS CLI con tus credenciales del lab. La usaremos para correr kubectl contra el EKS (listar pods, borrar un pod y ver cómo se recrea, listar nodos, kubectl get ns) sin configurar credenciales en tu PC. Es justo el punto 4 de la pizarra.
+
+Tags de las subredes para EKS: cuando se crea la VPC y las subredes manualmente (no con eksctl), hay que etiquetar las subredes para que EKS y el Load Balancer Controller sepan cómo usarlas. En una subred PÚBLICA se ponen estos tres tags:
+
+- Name = tienda-vpc-subnet-public2-us-east-1b : es solo una etiqueta descriptiva para identificar la subred en la consola. NO es obligatoria para EKS, pero conviene mantenerla porque ayuda a reconocer cada recurso. No se quita.
+
+- kubernetes.io/role/elb = 1 : marca la subred como apta para crear Load Balancers PÚBLICOS (internet-facing), por ejemplo cuando se crea un Service tipo LoadBalancer o un Ingress. El valor "1" NO es una cantidad ni un contador: es un flag booleano que significa "verdadero/activado"; AWS solo verifica que el tag exista y por convención se usa 1. En las subredes PRIVADAS el tag equivalente sería kubernetes.io/role/internal-elb = 1 (para balanceadores internos).
+
+- kubernetes.io/cluster/tienda-eks = shared : asocia la subred al clúster (tienda-eks es el nombre del clúster). El valor puede ser "shared" u "owned": "shared" significa que la subred puede ser usada por varios clústeres u otros recursos y que EKS NO la borrará al eliminar el clúster; "owned" significa que pertenece en exclusiva a ese clúster. Se usa "shared" porque es lo más seguro y recomendado cuando la VPC/subredes se crearon manualmente.
+
+Estos tres tags deben ir en TODAS las subredes públicas (public1 y public2). EKS recomienda como mínimo 2 subredes en 2 zonas de disponibilidad distintas (ej. us-east-1a y us-east-1b) para alta disponibilidad.

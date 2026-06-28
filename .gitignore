@@ -1,0 +1,9 @@
+# IDE (JetBrains)
+.idea/
+*.iml
+
+# Proyecto scratch de IntelliJ (repo git anidado, no forma parte del encargo)
+untitled/
+
+# Secrets / entorno
+.env
