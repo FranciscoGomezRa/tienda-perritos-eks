@@ -37,6 +37,25 @@ Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
 - Rol IAM utilizado: LabRole (en Learner Lab no se pueden crear roles nuevos).
 - Node group: tipo de instancia t3.medium, desired/min/max = 2 / 2 / 4, en subredes PRIVADAS.
 
+  PERMISOS IAM (políticas ya incluidas en LabRole)
+  ------------------------------------------------
+  No fue necesario crear ni adjuntar políticas: AWS Academy entrega LabRole con un
+  conjunto amplio de políticas administradas que ya cubren lo que EKS necesita (y
+  además Learner Lab bloquea la edición de roles IAM). El mismo LabRole se reutiliza
+  para el plano de control del clúster y para los nodos. Las 3 políticas clave para
+  que los nodos worker operen son:
+
+    • AmazonEKSWorkerNodePolicy — permite que la instancia EC2 se registre y funcione
+      como nodo del clúster EKS (comunicación del kubelet con el plano de control).
+    • AmazonEKS_CNI_Policy — habilita el plugin de red de EKS (Amazon VPC CNI) para
+      asignar IPs de la VPC a los pods y gestionar las interfaces de red (ENI).
+    • AmazonEC2ContainerRegistryReadOnly — da permiso de SOLO LECTURA sobre ECR, es
+      decir, autoriza el "docker pull" de nuestras imágenes (tienda-frontend/backend/db)
+      desde el registro privado hacia los nodos.
+
+  Nota: el rol del PLANO DE CONTROL no hace pull de imágenes (eso ocurre en los nodos);
+  su política relevante es AmazonEKSClusterPolicy, también incluida en LabRole.
+
   JUSTIFICACIÓN DEL DISEÑO DE RED (elegido: patrón de producción)
   ---------------------------------------------------------------
   Se evaluaron dos topologías:
