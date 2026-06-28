@@ -136,10 +136,18 @@ jobs:
           kubectl rollout status deployment/tienda-frontend -n "$EKS_NAMESPACE"
 
       # ========== METRICS SERVER (necesario para el HPA) ==========
-      # Best-effort: si ya está instalado, el apply es idempotente.
-      - name: Instalar Metrics Server (para HPA)
+      # El Metrics Server se provee como COMPLEMENTO gestionado del clúster EKS
+      # (habilitado en el wizard de creación). NO se instala el manifiesto de
+      # upstream (components.yaml) porque su Service usa el selector 'k8s-app',
+      # que al hacer 'apply' se fusionaba con el Service del complemento (cuyos
+      # pods usan 'app.kubernetes.io/name') dejando el selector con un AND
+      # imposible -> MissingEndpoints -> Metrics API caída -> HPA en <unknown>.
+      # Aquí solo verificamos que la Metrics API esté disponible.
+      - name: Verificar Metrics Server (para HPA)
         run: |
-          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml || true
+          kubectl get apiservices v1beta1.metrics.k8s.io
+          kubectl wait --for=condition=Available --timeout=120s \
+            apiservices/v1beta1.metrics.k8s.io || true
 
       # ========== AUTOSCALING (HPA) ==========
       - name: Aplicar HPA
