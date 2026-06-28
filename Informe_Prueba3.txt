@@ -1,0 +1,225 @@
+================================================================================
+ INFORME — EVALUACIÓN PARCIAL N°3
+ CI/CD con Autoscaling y Load Balancer en AWS EKS — "Tienda Perritos"
+ Asignatura: Introducción a Herramientas DevOps (ISY1101) — Duoc UC
+================================================================================
+
+Integrantes (dupla) : ______________________________  /  ______________________________
+Fecha               : ____ / ____ / ______
+Repositorio GitHub  : ____________________________________________________________
+Región AWS / Clúster: us-east-1 / tienda-eks        Namespace: tienda
+
+--------------------------------------------------------------------------------
+ 1. INTRODUCCIÓN Y OBJETIVO
+--------------------------------------------------------------------------------
+Breve descripción del encargo: orquestar la app "Tienda Perritos" (frontend + backend +
+MySQL) en AWS EKS, con pipeline CI/CD en GitHub Actions, autoscaling (HPA) y balanceo de
+carga, demostrando despliegue automatizado, escalabilidad y alta disponibilidad.
+
+[Escribir 4-6 líneas con tus palabras]
+
+
+--------------------------------------------------------------------------------
+ 2. ARQUITECTURA DE LA SOLUCIÓN
+--------------------------------------------------------------------------------
+Describir: VPC y 2 AZ, EKS + node group, ECR, flujo GitHub Actions, Services
+(LoadBalancer/ClusterIP/headless), comunicación interna por DNS. (Ver diagrama del README.md.)
+
+[Texto + diagrama]
+[FOTO opcional: diagrama de arquitectura]
+
+
+--------------------------------------------------------------------------------
+ IE1 — CONFIGURACIÓN DEL CLÚSTER AWS (VPC, subredes, SG, IAM, nodos)
+--------------------------------------------------------------------------------
+- VPC: tienda-vpc (10.0.0.0/16) con 6 subredes en 2 AZ (us-east-1a / us-east-1b):
+  2 públicas + 4 privadas. NAT Gateway para la salida a internet de las privadas.
+- Rol IAM utilizado: LabRole (en Learner Lab no se pueden crear roles nuevos).
+- Node group: tipo de instancia t3.medium, desired/min/max = 2 / 2 / 4, en subredes PRIVADAS.
+
+  PERMISOS IAM (políticas ya incluidas en LabRole)
+  ------------------------------------------------
+  No fue necesario crear ni adjuntar políticas: AWS Academy entrega LabRole con un
+  conjunto amplio de políticas administradas que ya cubren lo que EKS necesita (y
+  además Learner Lab bloquea la edición de roles IAM). El mismo LabRole se reutiliza
+  para el plano de control del clúster y para los nodos. Las 3 políticas clave para
+  que los nodos worker operen son:
+
+    • AmazonEKSWorkerNodePolicy — permite que la instancia EC2 se registre y funcione
+      como nodo del clúster EKS (comunicación del kubelet con el plano de control).
+    • AmazonEKS_CNI_Policy — habilita el plugin de red de EKS (Amazon VPC CNI) para
+      asignar IPs de la VPC a los pods y gestionar las interfaces de red (ENI).
+    • AmazonEC2ContainerRegistryReadOnly — da permiso de SOLO LECTURA sobre ECR, es
+      decir, autoriza el "docker pull" de nuestras imágenes (tienda-frontend/backend/db)
+      desde el registro privado hacia los nodos.
+
+  Nota: el rol del PLANO DE CONTROL no hace pull de imágenes (eso ocurre en los nodos);
+  su política relevante es AmazonEKSClusterPolicy, también incluida en LabRole.
+
+  JUSTIFICACIÓN DEL DISEÑO DE RED (elegido: patrón de producción)
+  ---------------------------------------------------------------
+  Se evaluaron dos topologías:
+
+  • Camino A (lab simplificado): nodos en subredes PÚBLICAS con auto-assign de IP
+    pública; sin NAT. Ventaja: cero costo de NAT y menos componentes. Desventaja:
+    los nodos quedan expuestos con IP pública (mayor superficie de ataque) y las
+    4 subredes privadas quedarían casi sin uso.
+
+  • Camino B (ELEGIDO, producción): nodos en subredes PRIVADAS (sin IP pública),
+    un NAT Gateway en subred pública para su salida a internet, y el Load Balancer
+    en las subredes públicas. Por qué lo elegimos:
+      - Seguridad: ningún nodo es accesible directamente desde internet; el único
+        punto de entrada es el ELB.
+      - Defensa en capas: aunque un pod sea comprometido, el nodo no está expuesto.
+      - Coherencia: las 6 subredes cumplen un rol real (públicas=ELB+NAT, privadas=nodos).
+      - Es la arquitectura recomendada por AWS para EKS en entornos reales.
+    Costo asumido: el NAT consume créditos; se mitigó usando 1 solo NAT y apagando
+    el lab al terminar. En producción se usaría 1 NAT por AZ para alta disponibilidad.
+
+  Aclaración técnica: auto-assign de IP pública (en subredes públicas) y NAT NO son
+  redundantes: actúan sobre capas distintas. Sería redundante solo si los nodos
+  estuvieran en públicas (con IP) y además se enrutaran por NAT.
+
+- Por qué 2 AZ: alta disponibilidad (si una zona de AWS falla, la otra sigue).
+- Por qué EKS: orquestación gestionada (auto-recuperación, escalado, rolling updates).
+
+   [FOTO] fotos/IE1_00_nat_gateway.png
+   [FOTO] fotos/IE1_01_vpc_subredes_2az.png
+   [FOTO] fotos/IE1_02_eks_cluster_active.png
+   [FOTO] fotos/IE1_03_nodegroup.png
+   [FOTO] fotos/IE1_04_nodos_ec2_ip_publica.png
+
+
+--------------------------------------------------------------------------------
+ IE2 — DESPLIEGUE FRONTEND + BACKEND (ECR, variables, ELB, URL pública)
+--------------------------------------------------------------------------------
+- Repos ECR creados: tienda-frontend / tienda-backend / tienda-db.
+- Imágenes desplegadas desde ECR; variables de entorno cargadas (DB_HOST, DB_USER, etc.).
+- Balanceo: Service tienda-frontend tipo LoadBalancer → Classic ELB público.
+- Comunicación Front→Back por DNS interno (tienda-backend) y Back→DB (tienda-db).
+- URL pública (EXTERNAL-IP del ELB): ________________________________________________
+
+   [FOTO] fotos/IE2_01_ecr_repos.png
+   [FOTO] fotos/IE2_02_ecr_imagenes.png
+   [FOTO] fotos/IE2_03_get_pods_running.png
+   [FOTO] fotos/IE2_04_external_ip.png
+   [FOTO] fotos/IE2_05_app_navegador.png
+
+
+--------------------------------------------------------------------------------
+ IE3 — AUTOSCALING (HPA)
+--------------------------------------------------------------------------------
+- HPA backend: 2→10 réplicas, umbral 70% CPU.  HPA frontend: 2→6, umbral 60% CPU.
+- Requisito: Metrics Server (instalado por el pipeline).
+- Justificación del umbral elegido: _________________________________________________
+- Evidencia de carga / escalado: ___________________________________________________
+
+   [FOTO] fotos/IE3_01_get_hpa.png
+   [FOTO] fotos/IE3_02_hpa_escalando.png
+   [FOTO] fotos/IE3_03_pods_nuevos.png
+
+NOTA (mejora futura): Cluster Autoscaler escalaría también los NODOS EC2 cuando el HPA
+pida más pods de los que caben. No se implementó (Learner Lab) pero se deja documentado.
+
+
+--------------------------------------------------------------------------------
+ IE4 — PIPELINE CI/CD (build → push → deploy)
+--------------------------------------------------------------------------------
+- Workflow: .github/workflows/deploy-eks.yml (trigger: push a main / manual).
+- Etapas: credenciales AWS → login ECR → build & push (front/back/db) → kubectl deploy.
+- Despliegue automático tras commit: SÍ / NO.  Tiempo aprox. del pipeline: ______ min.
+
+   [FOTO] fotos/IE4_01_workflow_verde.png
+
+
+--------------------------------------------------------------------------------
+ IE5 — GESTIÓN DE SECRETS Y CREDENCIALES
+--------------------------------------------------------------------------------
+- GitHub: Environment "production" con Secrets (AWS_* , EKS_* , MYSQL_ROOT_PASSWORD).
+- Credenciales de BD en .env (gitignored); el Secret de k8s se GENERA en el pipeline.
+- Sin contraseñas versionadas en el repositorio (db/Dockerfile y manifests limpios).
+- ¿Por qué un Environment? scope/aislamiento, reglas de protección, trazabilidad.
+
+   [FOTO] fotos/IE5_01_github_environment.png
+   [FOTO] fotos/IE5_02_github_secrets.png
+
+
+--------------------------------------------------------------------------------
+ IE6 — ANÁLISIS DE LOGS, MÉTRICAS Y TIEMPOS
+--------------------------------------------------------------------------------
+- Logs: kubectl logs (backend/frontend) y/o CloudWatch.
+- Métricas: uso de CPU/memoria de pods (Metrics Server / CloudWatch).
+- Tiempos del pipeline y observaciones / oportunidades de mejora: __________________
+
+   [FOTO] fotos/IE6_01_logs.png
+   [FOTO opcional] fotos/IE6_02_cloudwatch.png
+
+
+--------------------------------------------------------------------------------
+ IE7 — VALIDACIÓN FUNCIONAL (Front↔Back) Y RECUPERACIÓN
+--------------------------------------------------------------------------------
+- CRUD completo probado en la web (crear/editar/eliminar producto): OK / fallas.
+- Autorrecuperación: al borrar un pod, Kubernetes lo recrea automáticamente.
+- Recuperación post-redeploy (rollout exitoso tras commit): OK / fallas.
+
+   [FOTO] fotos/IE7_01_cloudshell_get_ns_nodes.png
+   [FOTO] fotos/IE7_02_pod_recreado.png
+   [FOTO] fotos/IE7_03_crud_ok.png
+   [FOTO] fotos/IE7_04_redeploy.png
+
+
+--------------------------------------------------------------------------------
+ BITÁCORA DE MEJORAS Y DECISIONES (se actualiza durante todo el proyecto)
+--------------------------------------------------------------------------------
+Lista central de mejoras aplicadas al proyecto base del profesor. Útil para la
+defensa y para el criterio de "optimización / mejora continua".
+
+[Estructura del repositorio]
+- Se unificó a un MONOREPO con la app en la raíz (los 3 repos entregados eran
+  idénticos byte a byte; se usó 3.6.3). Así GitHub Actions detecta el workflow.
+- Material del profesor archivado en docs_profesor/.
+
+[Correcciones de código]
+- fix(backend): server.js tenía DB_HOST = tienda-db (sin comillas) → referencia
+  inválida; corregido a "tienda-db".
+
+[Seguridad / Secrets — IE5]
+- Se quitaron credenciales horneadas en db/Dockerfile (la password va por runtime).
+- Se eliminó k8s/mysql-secret.yaml (password en base64 versionada) → ahora el Secret
+  se GENERA en el pipeline desde GitHub Secrets; queda mysql-secret.example.yaml.
+- Variables sensibles en .env (en .gitignore) + .env.example de referencia.
+- Secrets en un GitHub Environment "production" (scope, reglas de protección,
+  trazabilidad) en vez de sueltos en el repo.
+
+[Despliegue / Red — IE1, IE2]
+- frontend-service: se quitaron anotaciones del AWS LB Controller (no está en
+  Learner Lab) → Classic ELB con type: LoadBalancer (URL pública).
+- Diseño de red de PRODUCCIÓN (Camino B): 2 subredes públicas + 4 privadas en 2 AZ,
+  NAT Gateway, nodos worker en privadas (sin IP pública), ELB en públicas.
+  Etiquetado de subredes (role/elb e internal-elb) para el balanceo.
+
+[CI/CD — IE4]
+- Pipeline mejorado: usa el Environment "production"; genera el Secret de MySQL;
+  despliega también la imagen de la DB (set image + rollout); instala Metrics
+  Server (para HPA); etiqueta imágenes con SHA corto + latest.
+
+[Pendientes de anotar a medida que avanzamos]
+- (agregar aquí nuevas mejoras que surjan en cada fase)
+
+
+--------------------------------------------------------------------------------
+ 3. PROBLEMAS ENCONTRADOS Y SOLUCIONES
+--------------------------------------------------------------------------------
+- Problema 1: __________________________  →  Solución: __________________________
+- Problema 2: __________________________  →  Solución: __________________________
+(Ej.: credenciales del lab que rotan; HPA en <unknown> por falta de Metrics Server;
+ LoadBalancer que requería controller → se usó Classic ELB; etc.)
+
+
+--------------------------------------------------------------------------------
+ 4. CONCLUSIONES Y MEJORA CONTINUA
+--------------------------------------------------------------------------------
+[Reflexión sobre automatización, escalabilidad, seguridad de secrets y próximos pasos
+ (ej. Cluster Autoscaler, HTTPS/Ingress, dominio propio, tests en el pipeline).]
+
+================================================================================
